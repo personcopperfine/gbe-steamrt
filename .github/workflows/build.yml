@@ -62,5 +62,5 @@ jobs:
       - name: Publish release
         run: |
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" --title "$TAG" --notes-file BUILDINFO \
+          gh release create "$TAG" --latest --title "$TAG" --notes-file BUILDINFO \
             --target "$GITHUB_SHA" gbe-linux-x64.tar.gz SHA256SUMS BUILDINFO
