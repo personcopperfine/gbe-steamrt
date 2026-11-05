@@ -1,0 +1,66 @@
+name: build
+
+on:
+  schedule:
+    - cron: '23 5 * * 1' # weekly, Monday
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Upstream gbe_fork tag (default latest release-*)
+        required: false
+      force:
+        description: Rebuild even if the release exists at this REVISION
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.r.outputs.tag }}
+      build: ${{ steps.r.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: r
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_REF: ${{ inputs.ref }}
+          FORCE: ${{ inputs.force }}
+        run: ./resolve.sh >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build in steamrt4 sdk
+        run: |
+          docker buildx build \
+            --build-arg UPSTREAM_REF="$TAG" \
+            --build-arg REVISION="$(cat REVISION)" \
+            --cache-from type=gha,scope=gbe --cache-to type=gha,scope=gbe,mode=max \
+            --output type=local,dest=out .
+      - name: Package
+        run: |
+          tar -C out -czf gbe-linux-x64.tar.gz .
+          sha256sum gbe-linux-x64.tar.gz > SHA256SUMS
+          cp out/BUILDINFO BUILDINFO
+      - name: Publish release
+        run: |
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" --title "$TAG" --notes-file BUILDINFO \
+            --target "$GITHUB_SHA" gbe-linux-x64.tar.gz SHA256SUMS BUILDINFO
